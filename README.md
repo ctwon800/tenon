@@ -9,6 +9,25 @@
 ## 缺口验证码和旋转验证码解决方案
 该库主要提供两种类型的滑块识别，主要通过opencv实现，支持图片格式：base64、图片文件地址、图片url链接
 
+
+# 旋转识别接口调用示例
+curl -X POST "http://localhost:8000/api/rotate-identify" \
+-H "Content-Type: application/json" \
+-d '{
+    "small_circle": "/path/to/inner.png",
+    "big_circle": "/path/to/outer.png",
+    "image_type": 2
+}'
+
+# 缺口识别接口调用示例
+curl -X POST "http://localhost:8000/api/notch-identify" \
+-H "Content-Type: application/json" \
+-d '{
+    "slider": "/path/to/slide.png",
+    "background": "/path/to/background.png",
+    "image_type": 2
+}'
+
 ## 注意！
 > 该项目供学习交流使用，禁止利用该项目从事违反法律的行为
 
@@ -22,9 +41,9 @@
 ## notch_identify
 >缺口图片滑块识别  
 缺口图  
-![slide.png](https://image-luyuan.oss-cn-hangzhou.aliyuncs.com/image/slide.png)  
+![slide.png](tests/image/slide.png)  
 带滑块缺口的背景图  
-![background.png](https://image-luyuan.oss-cn-hangzhou.aliyuncs.com/image/background.png)  
+![background.png](tests/image/background.png)  
 
 ```python
 from tenon import notch_identify
@@ -40,9 +59,9 @@ distance = notch_identify(slide, background, image_type=2)
 ## rotate_identify
 >双图旋转图片滑块识别, 支持外圈图片为矩形、方形、圆形  
 内圈图  
-![inner.jpeg](https://image-luyuan.oss-cn-hangzhou.aliyuncs.com/image/inner.jpeg)  
+![inner.jpeg](tests/image/inner.jpeg)  
 外圈图  
-![outer.jpeg](https://image-luyuan.oss-cn-hangzhou.aliyuncs.com/image/outer.jpeg)   
+![outer.jpeg](tests/image/outer.jpeg)   
 
 ```python
 from tenon import rotate_identify
