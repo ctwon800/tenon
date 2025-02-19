@@ -1,18 +1,26 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse, FileResponse
+import cv2
+import numpy as np
+import io
 from pydantic import BaseModel
-from src.tenon import rotate_identify, notch_identify
+from src.tenon import rotate_identify, notch_identify, rotate_identify_and_show_image
+import os
+import uuid
 
 app = FastAPI()
 
 class RotateIdentifyRequest(BaseModel):
     small_circle: str  # 图片路径
-    big_circle: str    # 图片路径
+    big_circle: str  # 图片路径
     image_type: int
 
+
 class NotchIdentifyRequest(BaseModel):
-    slider: str        # 图片路径
-    background: str    # 图片路径
+    slider: str  # 图片路径
+    background: str  # 图片路径
     image_type: int
+
 
 @app.post("/api/rotate-identify")
 async def api_rotate_identify(request: RotateIdentifyRequest):
@@ -20,11 +28,12 @@ async def api_rotate_identify(request: RotateIdentifyRequest):
         result = rotate_identify(
             request.small_circle,
             request.big_circle,
-            request.image_type
+            request.image_type,
         )
-        return {"total_rotate_angle": result.total_rotate_angle}
+        return {"total_rotate_angle": round(result.total_rotate_angle)}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
 
 @app.post("/api/notch-identify")
 async def api_notch_identify(request: NotchIdentifyRequest):
@@ -36,4 +45,5 @@ async def api_notch_identify(request: NotchIdentifyRequest):
         )
         return {"offset": result}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e)) 
+        raise HTTPException(status_code=400, detail=str(e))
+

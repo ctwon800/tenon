@@ -119,25 +119,132 @@ def mask_image(origin_array, check_pixel):
     return mask_result
 
 
+def mask_outer_image(origin_array, check_pixel):
+    height, width = origin_array.shape[:2]
+
+    # 找到黑色圆圈的半径
+    # 对于灰度图像和彩色图像分别处理
+    if len(origin_array.shape) == 2:
+        # 灰度图像
+        black_pixels = np.where(origin_array == 0)
+    else:
+        # 彩色图像
+        black_pixels = np.where((origin_array == [0, 0, 0]).all(axis=2))
+
+    # 计算黑色区域的边界
+    if len(black_pixels[0]) > 0:
+        y_min, y_max = np.min(black_pixels[0]), np.max(black_pixels[0])
+        x_min, x_max = np.min(black_pixels[1]), np.max(black_pixels[1])
+
+        # 计算黑色圆圈的半径
+        black_radius = max((y_max - y_min), (x_max - x_min)) // 2
+        center_y = (y_max + y_min) // 2
+        center_x = (x_max + x_min) // 2
+    else:
+        # 如果没有找到黑色像素，使用默认值
+        black_radius = min(height, width) // 2
+        center_y, center_x = height // 2, width // 2
+
+    # 创建mask
+    mask = np.zeros((height, width), dtype=np.uint8)
+    center_point = (center_x, center_y)
+
+    # 使用黑色圆圈的半径加上check_pixel作为外圆半径
+    outer_radius = black_radius + check_pixel
+    # 使用黑色圆圈的半径作为内圆半径
+    inner_radius = black_radius
+
+    # 画外圆
+    cv2.circle(mask, center_point, outer_radius, (255, 255, 255), -1)
+    # 画内圆
+    cv2.circle(mask, center_point, inner_radius, (0, 0, 0), -1)
+
+    # 创建与原图相同维度的零矩阵
+    if len(origin_array.shape) == 3:
+        src_array = np.zeros((height, width, 3), dtype=np.uint8)
+    else:
+        src_array = np.zeros((height, width), dtype=np.uint8)
+
+    # 使用mask进行操作
+    mask_result = cv2.add(origin_array, src_array, mask=mask)
+    return mask_result
+
 def rotate_image(inner_image, outer_image, anticlockwise):
-    rotate_info_list = [RotateData(0, 0, 1, 361, 10)]
     rtype = int(anticlockwise) or -1
     h, w = inner_image.shape[:2]
-    for item in rotate_info_list:
-        min_similar_rotate_info = item
-        for angle in range(*item[2:]):
-            mat_rotate = cv2.getRotationMatrix2D((h * 0.5, w * 0.5), rtype * angle, 1)
-            dst = cv2.warpAffine(inner_image, mat_rotate, (h, w))
-            ret = cv2.matchTemplate(outer_image, dst, cv2.TM_CCOEFF_NORMED)
-            similar_value = cv2.minMaxLoc(ret)[1]
-            if similar_value < min_similar_rotate_info.similar:
-                continue
-            rotate_info = RotateData(similar_value, angle, angle - 10, angle + 10, 10)
-            rotate_info_list.append(rotate_info)
-            if len(rotate_info_list) > 5:
-                rotate_info_list.remove(min_similar_rotate_info)
-            min_similar_rotate_info = min(rotate_info_list)
-    return max(rotate_info_list)
+    center = (h * 0.5, w * 0.5)
+    
+    # 优化模板匹配方法及权重
+    methods = [
+        (cv2.TM_CCOEFF_NORMED, 0.5),  # 降低相关系数匹配的权重
+        (cv2.TM_CCORR_NORMED, 0.3),   # 降低相关匹配的权重
+        (cv2.TM_SQDIFF_NORMED, 0.2)   # 增加平方差匹配的权重
+    ]
+    total_weight = sum(weight for _, weight in methods)
+    
+    # 第一阶段：粗搜索（步长减小到2度，提高初始精度）
+    best_angle = 0
+    max_similar = 0
+    
+    for angle in range(0, 360, 2):  # 步长从3改为2
+        mat_rotate = cv2.getRotationMatrix2D(center, rtype * angle, 1)
+        dst = cv2.warpAffine(inner_image, mat_rotate, (h, w))
+        
+        similar_sum = 0
+        for method, weight in methods:
+            ret = cv2.matchTemplate(outer_image, dst, method)
+            if method == cv2.TM_SQDIFF_NORMED:
+                similar_sum += (1.0 - cv2.minMaxLoc(ret)[0]) * weight
+            else:
+                similar_sum += cv2.minMaxLoc(ret)[1] * weight
+        
+        similar_value = similar_sum / total_weight
+        if similar_value > max_similar:
+            max_similar = similar_value
+            best_angle = angle
+    
+    # 第二阶段：中等精度搜索（扩大搜索范围到±4度）
+    second_start = max(0, best_angle - 4)
+    second_end = min(360, best_angle + 4)
+    for angle in np.arange(second_start, second_end, 0.2):  # 步长从0.3改为0.2
+        mat_rotate = cv2.getRotationMatrix2D(center, rtype * angle, 1)
+        dst = cv2.warpAffine(inner_image, mat_rotate, (h, w))
+        
+        similar_sum = 0
+        for method, weight in methods:
+            ret = cv2.matchTemplate(outer_image, dst, method)
+            if method == cv2.TM_SQDIFF_NORMED:
+                similar_sum += (1.0 - cv2.minMaxLoc(ret)[0]) * weight
+            else:
+                similar_sum += cv2.minMaxLoc(ret)[1] * weight
+        
+        similar_value = similar_sum / total_weight
+        if similar_value > max_similar:
+            max_similar = similar_value
+            best_angle = angle
+    
+    # 第三阶段：高精度搜索（扩大搜索范围到±0.4度）
+    fine_start = max(0, best_angle - 0.4)
+    fine_end = min(360, best_angle + 0.4)
+    best_match = RotateData(max_similar, best_angle, 0, 360, 0.02)
+    
+    for angle in np.arange(fine_start, fine_end, 0.02):  # 步长从0.05改为0.02
+        mat_rotate = cv2.getRotationMatrix2D(center, rtype * angle, 1)
+        dst = cv2.warpAffine(inner_image, mat_rotate, (h, w))
+        
+        similar_sum = 0
+        for method, weight in methods:
+            ret = cv2.matchTemplate(outer_image, dst, method)
+            if method == cv2.TM_SQDIFF_NORMED:
+                similar_sum += (1.0 - cv2.minMaxLoc(ret)[0]) * weight
+            else:
+                similar_sum += cv2.minMaxLoc(ret)[1] * weight
+        
+        similar_value = similar_sum / total_weight
+        if similar_value > best_match.similar:
+            best_match = RotateData(similar_value, angle, fine_start, fine_end, 0.02)
+    
+    return best_match
 
 
 def image_to_cv2(base_image: str, image_type: int, grayscale: bool, proxies=None):
@@ -201,7 +308,7 @@ def rotate_identify(
     )
 
     inner_annulus = mask_image(cut_inner_image, check_pixel)
-    outer_annulus = mask_image(cut_outer_image, check_pixel)
+    outer_annulus = mask_outer_image(cut_outer_image, check_pixel)
 
     rotate_info = rotate_image(inner_annulus, outer_annulus, anticlockwise)
     inner_angle = round(rotate_info.angle * speed_ratio / (speed_ratio + 1), 2)
@@ -276,7 +383,7 @@ def rotate_identify_and_show_image(
     cv2.imshow("cut_outer_image", cut_outer_image)
 
     inner_annulus = mask_image(cut_inner_image, check_pixel)
-    outer_annulus = mask_image(cut_outer_image, check_pixel)
+    outer_annulus = mask_outer_image(cut_outer_image, check_pixel)
     # outer_annulus = cv2.resize(outer_annulus, inner_annulus.shape[:2])
 
     cv2.imshow("inner_annulus", inner_annulus)
